@@ -31,6 +31,22 @@ class ConversionOptions:
     # False = truncated preview uses the user's codec/container (HDR preserved).
     preview_compat: bool = True
     output_detail_strength: float = 1.0
+    # Post-DLSS color & light correction (see core.composition.ColorGradeParams)
+    luma_match: float = 0.0
+    exposure: float = 0.0
+    contrast: float = 0.0
+    saturation: float = 0.0
+    shadows: float = 0.0
+    highlights: float = 0.0
+    # Post-DLSS detail & cleanup (see core.composition.EnhanceParams)
+    gamma: float = 1.0
+    sharpen: float = 0.0
+    edge_only: bool = True
+    clarity: float = 0.0
+    skin_smoothing: float = 0.0
+    deband: bool = False
+    # Video-only temporal cleanup
+    temporal_deflicker: float = 0.0  # 0..1, 0 = off
 
 @dataclass(slots=True)
 class ConversionResult:

@@ -1,0 +1,347 @@
+{
+  "id": "dlss-all-in-one-example",
+  "revision": 0,
+  "last_node_id": 9,
+  "last_link_id": 6,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadImage",
+      "pos": [60, 120],
+      "size": [315, 314],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [1],
+          "slot_index": 0
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "example.png",
+        "image"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "NvidiaDLSSImageUpscale",
+      "pos": [480, 60],
+      "size": [420, 760],
+      "flags": {},
+      "order": 1,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "upscaled_image",
+          "type": "IMAGE",
+          "links": [2],
+          "slot_index": 0
+        },
+        {
+          "name": "report_json",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NvidiaDLSSImageUpscale"
+      },
+      "widgets_values": [
+        "1.5× (Quality)",
+        false,
+        true,
+        "Default",
+        "Default",
+        1.0,
+        1.0,
+        1.0,
+        -1.0,
+        false,
+        "Default",
+        1.0,
+        false,
+        false,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        true,
+        0.0,
+        false,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": 3,
+      "type": "SaveImage",
+      "pos": [960, 120],
+      "size": [315, 326],
+      "flags": {},
+      "order": 2,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 2
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "DLSS5_upscaled"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "LoadVideo",
+      "pos": [60, 1060],
+      "size": [315, 180],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [3],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadVideo"
+      },
+      "widgets_values": [
+        "example.mp4"
+      ]
+    },
+    {
+      "id": 5,
+      "type": "NvidiaDLSSVideoUpscale",
+      "pos": [480, 1000],
+      "size": [420, 900],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "upscaled_video",
+          "type": "VIDEO",
+          "links": [4],
+          "slot_index": 0
+        },
+        {
+          "name": "report_json",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NvidiaDLSSVideoUpscale"
+      },
+      "widgets_values": [
+        "1.5× (Quality)",
+        false,
+        true,
+        "Default",
+        "Default",
+        1.0,
+        1.0,
+        1.0,
+        -1.0,
+        false,
+        "Default",
+        "Max",
+        "H.264",
+        "MP4",
+        "Auto",
+        "_DLSS5",
+        false,
+        1.0,
+        false,
+        false,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        true,
+        0.0,
+        false,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": 6,
+      "type": "SaveVideo",
+      "pos": [960, 1060],
+      "size": [315, 200],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 4
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SaveVideo"
+      },
+      "widgets_values": [
+        "video/ComfyUI",
+        "auto"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "LoadVideo",
+      "pos": [60, 2060],
+      "size": [315, 180],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [5],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadVideo"
+      },
+      "widgets_values": [
+        "example.mp4"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "NvidiaDLSSFrameInterpolation",
+      "pos": [480, 2000],
+      "size": [420, 320],
+      "flags": {},
+      "order": 7,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 5
+        }
+      ],
+      "outputs": [
+        {
+          "name": "interpolated_video",
+          "type": "VIDEO",
+          "links": [6],
+          "slot_index": 0
+        },
+        {
+          "name": "report_json",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NvidiaDLSSFrameInterpolation"
+      },
+      "widgets_values": [
+        "60",
+        "Auto",
+        "Max",
+        "H.264",
+        "MP4",
+        "Auto",
+        "_DLSSFG",
+        false
+      ]
+    },
+    {
+      "id": 9,
+      "type": "SaveVideo",
+      "pos": [960, 2060],
+      "size": [315, 200],
+      "flags": {},
+      "order": 8,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 6
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SaveVideo"
+      },
+      "widgets_values": [
+        "video/ComfyUI",
+        "auto"
+      ]
+    }
+  ],
+  "links": [
+    [1, 1, 0, 2, 0, "IMAGE"],
+    [2, 2, 0, 3, 0, "IMAGE"],
+    [3, 4, 0, 5, 0, "VIDEO"],
+    [4, 5, 0, 6, 0, "VIDEO"],
+    [5, 7, 0, 8, 0, "VIDEO"],
+    [6, 8, 0, 9, 0, "VIDEO"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.8,
+      "offset": [0, 0]
+    }
+  },
+  "version": 0.4
+}

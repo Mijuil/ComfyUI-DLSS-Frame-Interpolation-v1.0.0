@@ -18,9 +18,16 @@ import numpy as np
 
 from ..core import ffmpeg
 from ..core.composition import (
+    TemporalDeflicker,
+    apply_color_grade,
+    apply_enhance,
+    color_grade_report,
     compose_sdr,
     composition_report,
+    enhance_report,
+    validate_color_grade,
     validate_detail_strength,
+    validate_enhance,
 )
 from ..core.gpu_selection import resolve_runtime_ai_gpu
 from ..core.jobs import Cancelled, active_job
@@ -78,6 +85,25 @@ def convert_video(
 ) -> ConversionResult:
     options = options or ConversionOptions()
     detail_strength = validate_detail_strength(options.output_detail_strength)
+    color_grade = validate_color_grade(
+        options.luma_match,
+        options.exposure,
+        options.contrast,
+        options.saturation,
+        options.shadows,
+        options.highlights,
+    )
+    enhance = validate_enhance(
+        options.gamma,
+        options.sharpen,
+        options.clarity,
+        options.skin_smoothing,
+    )
+    enhance.edge_only = bool(options.edge_only)
+    enhance.deband = bool(options.deband)
+    deflicker_strength = float(getattr(options, "temporal_deflicker", 0.0) or 0.0)
+    if not math.isfinite(deflicker_strength) or not 0.0 <= deflicker_strength <= 1.0:
+        raise ValueError("Temporal deflicker must be between 0 and 1.")
     if options.preserve_hdr and detail_strength != 1.0:
         raise ValueError("Output detail strength is currently SDR-only.")
     source = Path(input_path).resolve()
@@ -261,6 +287,7 @@ def convert_video(
                 controller=controller,
             )
             timings["native_setup_seconds"] = time.perf_counter() - session_started
+            deflicker = TemporalDeflicker(deflicker_strength)
             encoder_setup_thread.join()
             encoder_setup_thread = None
             timings["setup_seconds"] = max(
@@ -431,6 +458,9 @@ def convert_video(
                 )
                 dlss_seconds += time.perf_counter() - dlss_started
                 processed = compose_sdr(rgba, processed, detail_strength)
+                processed = apply_color_grade(rgba, processed, color_grade)
+                processed = apply_enhance(processed, enhance)
+                processed = deflicker.apply(processed, reset=guide.reset)
                 if is_preview:
                     if preview_pts_origin is None:
                         preview_pts_origin = out_pts
@@ -539,6 +569,13 @@ def convert_video(
                 "encoding_quality": encoding_quality,
                 "frames_processed": delivered,
                 "output_composition": composition_report(detail_strength),
+                "color_grade": color_grade_report(color_grade),
+                "enhance": enhance_report(enhance),
+                "temporal_deflicker": {
+                    "strength": deflicker_strength,
+                    "applied": deflicker_strength > 0.0,
+                    "method": "ema-global-luma-gain",
+                },
                 "render_mode": (
                     "full"
                     if not is_preview

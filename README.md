@@ -68,6 +68,8 @@ The animated comparison is a deliberately slowed demonstration, not real-time pl
 - Bundled DLSS Frame Generation, Super Resolution, and Neural Rendering runtimes
 - Separate image-upscale and video-upscale nodes
 - DLSS resolution modes from native/DLAA through 3x Ultra Performance
+- Switchable UI sections on the upscale nodes — **Neural Processing (DLSS5)**, **Output Composition**, **Quality & Cleanup**, **Color & Light** — each gated by its own enable toggle that bypasses the whole group when off
+- Section headers render in the Properties panel and as canvas banners; disabling a section resets its parameters to neutral values at run time
 - NR preset, style, intensity, tone, structure, skin structure, automatic mask, and DLSS model controls
 - Native or cascaded frame interpolation with exact fractional FPS choices
 - CPU and NVIDIA NVENC video encoders
@@ -111,13 +113,24 @@ not active, and **Require Neural Upscaling** still rejects that fallback.
 
 ## Installation
 
-1. Download a packaged release, or clone the repository with Git LFS enabled.
-2. Place the complete folder at:
+### One-click (Windows)
+
+1. Extract the release archive into `ComfyUI/custom_nodes/` so the folder reads:
 
    ```text
    ComfyUI/custom_nodes/ComfyUI-DLSS-Frame-Interpolation/
    ```
 
+2. Double-click `install.bat` inside that folder. It finds the ComfyUI Python
+   automatically (portable `python_embeded`, `venv`, or system Python),
+   installs the Python dependencies, and checks for FFmpeg and the NVIDIA driver.
+
+3. Restart ComfyUI.
+
+### Manual
+
+1. Download a packaged release, or clone the repository with Git LFS enabled.
+2. Place the complete folder at `ComfyUI/custom_nodes/ComfyUI-DLSS-Frame-Interpolation/`.
 3. Confirm that FFmpeg and FFprobe are available:
 
    ```powershell
@@ -166,6 +179,19 @@ This node accepts a ComfyUI `IMAGE` batch and returns the upscaled batch directl
 - Each input dimension must be at least 64 pixels.
 
 Connect `upscaled_image` to **Preview Image**, **Save Image**, or another image-processing node.
+
+## UI sections
+
+The two upscale nodes group their many controls into four collapsible sections, each with its own enable toggle:
+
+| Section | Toggle | Contents |
+| --- | --- | --- |
+| Neural Processing (DLSS5) | `enable_nr` | NR preset, style, intensity, tone, structure, skin, mask, model preset |
+| Output Composition | `output_detail_strength` | SDR brightness-ratio amplification (1.0–2.0) |
+| Quality & Cleanup | `enable_enhance` | Debanding, gamma, skin smoothing, clarity, sharpen, edge-only, deflicker |
+| Color & Light | `enable_color` | Luma match, exposure, contrast, saturation, shadows, highlights |
+
+A disabled section leaves its parameters at neutral values; the underlying DLSS processing is identical. Section titles are part of the input schema (`display_name`), so they appear in the Properties panel and in saved-workflow JSON regardless of frontend; the canvas banners come from a tiny bundled JavaScript extension (`web/dlss_sections.js`, served via `WEB_DIRECTORY`).
 
 ## Neural Rendering controls
 

@@ -18,7 +18,16 @@ import folder_paths
 from comfy_api.latest import ComfyExtension, InputImpl, Types, io, ui
 
 from .dlss_engine.core.composition import (
-    compose_sdr, composition_report, validate_detail_strength,
+    TemporalDeflicker,
+    apply_color_grade,
+    apply_enhance,
+    color_grade_report,
+    compose_sdr,
+    composition_report,
+    enhance_report,
+    validate_color_grade,
+    validate_detail_strength,
+    validate_enhance,
 )
 from .dlss_engine.core.ffmpeg import CODEC_CHOICES, ENCODING_QUALITIES
 from .dlss_engine.core.gpu_selection import resolve_runtime_ai_gpu
@@ -42,6 +51,9 @@ from .dlss_engine.video import ConversionOptions, convert_video
 
 CONTAINER_CHOICES = ("MP4", "MKV", "MOV")
 RENAME_MODES = ("Auto", "Copy", "Custom")
+
+# Canvas-only cosmetics (section header banners) served to the frontend.
+WEB_DIRECTORY = "web"
 UPSCALE_FACTORS = {mode["label"]: factor for factor, mode in UPSCALING_MODES.items()}
 
 
@@ -104,15 +116,101 @@ def _neural_options(
 
 
 def _neural_inputs() -> list:
+    """DLSS5 native neural controls; the section toggle gates them all."""
     return [
-        io.Combo.Input("nr_preset", options=list(NR_PRESETS), default="Default"),
-        io.Combo.Input("nr_style", options=list(NR_STYLES), default="Default"),
-        io.Float.Input("nr_intensity", default=1.0, min=0.0, max=2.0, step=0.05),
-        io.Float.Input("local_tone_strength", default=1.0, min=0.0, max=2.0, step=0.05),
-        io.Float.Input("local_structure_strength", default=1.0, min=0.0, max=2.0, step=0.05),
-        io.Float.Input("skin_structure_strength", default=-1.0, min=-1.0, max=2.0, step=0.05),
-        io.Boolean.Input("automatic_mask", default=False),
-        io.Combo.Input("dlss_model_preset", options=list(DLSS_MODEL_PRESETS), default="Default"),
+        io.Boolean.Input(
+            "enable_nr", default=True,
+            display_name="Нейрообработка DLSS5",
+            tooltip="ВЫКЛЮЧАТЕЛЬ РАЗДЕЛА «Нейрообработка DLSS5». "
+            "Выключите — все настройки ниже игнорируются (шумодав работает в заводском режиме).",
+        ),
+        io.Combo.Input(
+            "nr_preset", options=list(NR_PRESETS), default="Default",
+            tooltip="Пресет нейрошумодава из DLSS5 SDK: Default — рекомендованный NVIDIA; "
+            "остальные — альтернативные заводские конфигурации.",
+        ),
+        io.Combo.Input(
+            "nr_style", options=list(NR_STYLES), default="Default",
+            tooltip="Стиль обработки шумодава: Default — стандартный баланс; "
+            "Natural — мягче, бережнее к текстуре кожи; "
+            "Cinematic — плотнее глушит шум, кинематографичный результат.",
+        ),
+        io.Float.Input(
+            "nr_intensity", default=1.0, min=0.0, max=2.0, step=0.05,
+            tooltip="Сила шумоподавления: 0 — без шумодава; 1 — штатный режим NVIDIA; "
+            "до 2 — агрессивнее (риск потери мелких деталей и текстуры кожи).",
+        ),
+        io.Float.Input(
+            "local_tone_strength", default=1.0, min=0.0, max=2.0, step=0.05,
+            tooltip="Локальный тон: как активно DLSS выравнивает яркость соседних областей. "
+            "Меньше — естественнее градиенты неба и теней.",
+        ),
+        io.Float.Input(
+            "local_structure_strength", default=1.0, min=0.0, max=2.0, step=0.05,
+            tooltip="Сохранение структур: контуры, текст, узоры. "
+            "Выше — чётче мелкие детали; ниже — мягче, меньше «звона» на границах.",
+        ),
+        io.Float.Input(
+            "skin_structure_strength", default=-1.0, min=-1.0, max=2.0, step=0.05,
+            tooltip="Текстура кожи: −1 — авто (DLSS сам распознаёт кожу и бережёт её); "
+            "0 — выключено; >0 — ручная сила сохранения пор и микрорельефа лица.",
+        ),
+        io.Boolean.Input(
+            "automatic_mask", default=False,
+            tooltip="Автомаска: DLSS сам находит зоны (кожа, волосы, глубокие тени), "
+            "где обработка становится деликатнее.",
+        ),
+        io.Combo.Input(
+            "dlss_model_preset", options=list(DLSS_MODEL_PRESETS), default="Default",
+            tooltip="Версия нейросети DLSS (модели J/K/L/M). Баланс детализации и "
+            "стабильности различается; Default — модель вашего драйвера.",
+        ),
+    ]
+
+
+def _enhance_inputs() -> list:
+    """Post-DLSS cleanup & detail controls, every feature has its own toggle."""
+    return [
+        io.Boolean.Input(
+            "enable_enhance", default=False,
+            display_name="Качество и очистка",
+            tooltip="ВЫКЛЮЧАТЕЛЬ РАЗДЕЛА «Качество и очистка»: гамма, кожа, дебандинг, "
+            "дефликер, чёткость. Выкл — блок полностью обойдён, картинка как из DLSS.",
+        ),
+        io.Boolean.Input(
+            "enable_deband", default=False,
+            tooltip="Дебандинг: убирает полосы и блочность H.264/H.265 на градиентах "
+            "(небо, тени). Включайте для пережатых или сгенерированных видео.",
+        ),
+        io.Float.Input(
+            "gamma", default=1.0, min=0.25, max=2.5, step=0.05, optional=True,
+            tooltip="Гамма средних тонов: <1 — осветляет кожу и полутени (лечит «тёмную кожу» "
+            "после DLSS); >1 — затемняет. 1.0 — без изменений.",
+        ),
+        io.Float.Input(
+            "skin_smoothing", default=0.0, min=0.0, max=1.0, step=0.05, optional=True,
+            tooltip="Сглаживание кожи: двусторонний фильтр убирает генерационный шум и рябь "
+            "на коже, сохраняя поры и контуры. 0 — выкл; 0.3–0.5 — лёгкая чистка.",
+        ),
+        io.Float.Input(
+            "clarity", default=0.0, min=-1.0, max=1.0, step=0.05, optional=True,
+            tooltip="Клэрити (локальный контраст средних частот): + — возвращает объём и "
+            "резкость после шумодава; − — мягче/пластиковее. 0 — выкл.",
+        ),
+        io.Float.Input(
+            "sharpen", default=0.0, min=0.0, max=2.0, step=0.05, optional=True,
+            tooltip="Резкость (unsharp mask). Начните с 0.3–0.6; выше 1.0 — риск ореолов.",
+        ),
+        io.Boolean.Input(
+            "edge_only", default=True,
+            tooltip="Только контуры: резкость действует лишь на границы (Sobel-маска); "
+            "плоские зоны — кожа, небо — не затрагиваются. Рекомендуется держать вкл.",
+        ),
+        io.Float.Input(
+            "temporal_deflicker", default=0.0, min=0.0, max=1.0, step=0.05, optional=True,
+            tooltip="Анти-мерцание (только видео): стабилизирует скачки яркости между кадрами "
+            "после DLSS. 0 — выкл; 0.5–0.8 — мягкая стабилизация. На статичном свете почти не влияет.",
+        ),
     ]
 
 
@@ -120,10 +218,41 @@ def _output_detail_strength_input():
     """Append-only widget so saved video workflows retain their existing order."""
     return io.Float.Input(
         "output_detail_strength", default=1.0, min=1.0, max=2.0,
-        step=0.05, optional=True,
-        tooltip="SDR output composition: 1 preserves worker output; "
-        "2 amplifies brightness changes. Separate from NR intensity.",
+        step=0.05, optional=True, display_name="Композиция вывода",
+        tooltip="SDR-композиция вывода: 1 — сохраняет выход DLSS как есть; "
+        "2 — усиливает изменения яркости. Отдельно от силы шумодава.",
     )
+
+
+def _color_grade_inputs():
+    """Append-only color & light widgets; all neutral at 0.0 = no grading."""
+    return [
+        io.Boolean.Input(
+            "enable_color", default=False,
+            display_name="Цвет и свет",
+            tooltip="ВЫКЛЮЧАТЕЛЬ РАЗДЕЛА «Цвет и свет»: luma-выравнивание и вся цветокоррекция. "
+            "Выкл — цвет не трогается вовсе.",
+        ),
+        io.Float.Input("luma_match", default=0.0, min=0.0, max=1.0, step=0.05,
+                       optional=True,
+                       tooltip="Авто-исправление потемнения: подтягивает яркость результата к "
+                       "источнику (0 — выкл, 1 — полная коррекция). Для кожи рекомендую 0.5–0.8."),
+        io.Float.Input("exposure", default=0.0, min=-1.0, max=1.0, step=0.05,
+                       optional=True, tooltip="Ручная экспозиция в стопах (−1..+1): "
+                       "проще говоря, общая яркость кадра."),
+        io.Float.Input("contrast", default=0.0, min=-1.0, max=1.0, step=0.05,
+                       optional=True, tooltip="Контраст вокруг среднего серого: "
+                       "+ — сочнее и жёстче, − — мягче, туманнее."),
+        io.Float.Input("saturation", default=0.0, min=-1.0, max=1.0, step=0.05,
+                       optional=True, tooltip="Насыщенность цвета: + — ярче цвета, "
+                       "− — ближе к ч/б."),
+        io.Float.Input("shadows", default=0.0, min=-1.0, max=1.0, step=0.05,
+                       optional=True, tooltip="Тени: + — поднять (появится детали в тёмном), "
+                       "− — придавить (глубже чёрный)."),
+        io.Float.Input("highlights", default=0.0, min=-1.0, max=1.0, step=0.05,
+                       optional=True, tooltip="Света: + — вернуть детали в пересветах, "
+                       "− — сжечь ярче."),
+    ]
 
 
 class NvidiaDLSSFrameInterpolation(io.ComfyNode):
@@ -221,6 +350,8 @@ class NvidiaDLSSVideoUpscale(io.ComfyNode):
                 io.String.Input("custom_suffix", default="_DLSS5"),
                 io.Boolean.Input("hdr_mode", default=False, tooltip="10-bit output with input colorspace metadata. Supported by H.265, AV1, and ProRes only."),
                 _output_detail_strength_input(),
+                *_enhance_inputs(),
+                *_color_grade_inputs(),
             ],
             outputs=[
                 io.Video.Output("video", display_name="upscaled_video"),
@@ -253,13 +384,60 @@ class NvidiaDLSSVideoUpscale(io.ComfyNode):
         custom_suffix: str,
         hdr_mode: bool,
         output_detail_strength: float = 1.0,
+        enable_nr: bool = True,
+        enable_color: bool = False,
+        enable_enhance: bool = False,
+        luma_match: float = 0.0,
+        exposure: float = 0.0,
+        contrast: float = 0.0,
+        saturation: float = 0.0,
+        shadows: float = 0.0,
+        highlights: float = 0.0,
+        enable_deband: bool = False,
+        gamma: float = 1.0,
+        skin_smoothing: float = 0.0,
+        clarity: float = 0.0,
+        sharpen: float = 0.0,
+        edge_only: bool = True,
+        temporal_deflicker: float = 0.0,
     ) -> io.NodeOutput:
         output_detail_strength = validate_detail_strength(output_detail_strength)
+        if not enable_nr:
+            nr_preset, nr_style = "Default", "Default"
+            nr_intensity, local_tone_strength = 1.0, 1.0
+            local_structure_strength, skin_structure_strength = 1.0, -1.0
+            automatic_mask = False
+            dlss_model_preset = "Default"
+        if not enable_color:
+            luma_match = exposure = contrast = saturation = shadows = highlights = 0.0
+        color_grade = validate_color_grade(
+            luma_match, exposure, contrast, saturation, shadows, highlights
+        )
+        if not enable_enhance:
+            gamma, skin_smoothing, clarity, sharpen = 1.0, 0.0, 0.0, 0.0
+            enable_deband, edge_only = False, True
+            temporal_deflicker = 0.0
+        enhance = validate_enhance(gamma, sharpen, clarity, skin_smoothing)
+        enhance.edge_only = bool(edge_only)
+        enhance.deband = bool(enable_deband)
         _progress_bar, progress = _progress_callback()
         temp_base = Path(folder_paths.get_temp_directory()).resolve()
         output_dir = Path(tempfile.mkdtemp(prefix="dlss5-video-output-", dir=temp_base))
         options = ConversionOptions(
             output_detail_strength=output_detail_strength,
+            luma_match=color_grade.luma_match,
+            exposure=color_grade.exposure,
+            contrast=color_grade.contrast,
+            saturation=color_grade.saturation,
+            shadows=color_grade.shadows,
+            highlights=color_grade.highlights,
+            gamma=enhance.gamma,
+            sharpen=enhance.sharpen,
+            edge_only=enhance.edge_only,
+            clarity=enhance.clarity,
+            skin_smoothing=enhance.skin_smoothing,
+            deband=enhance.deband,
+            temporal_deflicker=temporal_deflicker,
             nr_preset=str(nr_preset),
             nr_style=str(nr_style),
             nr_intensity=float(nr_intensity),
@@ -319,6 +497,8 @@ class NvidiaDLSSImageUpscale(io.ComfyNode):
                 io.Boolean.Input("require_neural_upscaling", default=False, tooltip="Fail instead of returning a larger fallback result when NVIDIA reports neural upscaling inactive."),
                 *_neural_inputs(),
                 _output_detail_strength_input(),
+                *_enhance_inputs(),
+                *_color_grade_inputs(),
             ],
             outputs=[
                 io.Image.Output("image", display_name="upscaled_image"),
@@ -341,8 +521,41 @@ class NvidiaDLSSImageUpscale(io.ComfyNode):
         automatic_mask: bool,
         dlss_model_preset: str,
         output_detail_strength: float = 1.0,
+        enable_nr: bool = True,
+        enable_color: bool = False,
+        enable_enhance: bool = False,
+        luma_match: float = 0.0,
+        exposure: float = 0.0,
+        contrast: float = 0.0,
+        saturation: float = 0.0,
+        shadows: float = 0.0,
+        highlights: float = 0.0,
+        enable_deband: bool = False,
+        gamma: float = 1.0,
+        skin_smoothing: float = 0.0,
+        clarity: float = 0.0,
+        sharpen: float = 0.0,
+        edge_only: bool = True,
+        temporal_deflicker: float = 0.0,
     ) -> io.NodeOutput:
         output_detail_strength = validate_detail_strength(output_detail_strength)
+        if not enable_nr:
+            nr_preset, nr_style = "Default", "Default"
+            nr_intensity, local_tone_strength = 1.0, 1.0
+            local_structure_strength, skin_structure_strength = 1.0, -1.0
+            automatic_mask = False
+            dlss_model_preset = "Default"
+        if not enable_color:
+            luma_match = exposure = contrast = saturation = shadows = highlights = 0.0
+        color_grade = validate_color_grade(
+            luma_match, exposure, contrast, saturation, shadows, highlights
+        )
+        if not enable_enhance:
+            gamma, skin_smoothing, clarity, sharpen = 1.0, 0.0, 0.0, 0.0
+            enable_deband, edge_only = False, True
+        enhance = validate_enhance(gamma, sharpen, clarity, skin_smoothing)
+        enhance.edge_only = bool(edge_only)
+        enhance.deband = bool(enable_deband)
         if image.ndim != 4 or image.shape[-1] not in (1, 3, 4):
             raise ValueError("IMAGE must have shape [batch, height, width, channels] with 1, 3, or 4 channels.")
         batch, input_height, input_width, channels = map(int, image.shape)
@@ -412,6 +625,8 @@ class NvidiaDLSSImageUpscale(io.ComfyNode):
                     processed = compose_sdr(
                         rgba, processed, output_detail_strength
                     )
+                    processed = apply_color_grade(rgba, processed, color_grade)
+                    processed = apply_enhance(processed, enhance)
                     if channels == 4:
                         processed[..., 3] = cv2.resize(
                             alpha,
@@ -445,6 +660,8 @@ class NvidiaDLSSImageUpscale(io.ComfyNode):
             "feature_18_confirmed": True,
             "images_processed": batch,
             "output_composition": composition_report(output_detail_strength),
+            "color_grade": color_grade_report(color_grade),
+            "enhance": enhance_report(enhance),
             "input_dimensions": {"width": input_width, "height": input_height},
             "negotiated_render_dimensions": {"width": session.render_width, "height": session.render_height},
             "output_dimensions": {"width": output_width, "height": output_height},

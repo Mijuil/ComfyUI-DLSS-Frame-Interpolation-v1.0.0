@@ -1,0 +1,4 @@
+# Runtime dependencies beyond the ComfyUI base environment.
+# torch, av, numpy and OpenCV (cv2) ship with current ComfyUI portable builds.
+opencv-python
+numpy
