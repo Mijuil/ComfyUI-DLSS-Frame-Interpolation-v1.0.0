@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-dlss-frame-interpolation"
 description = "Native NVIDIA DLSS 5 nodes for ComfyUI: frame interpolation, video upscale, and image upscale with neural rendering controls."
-version = "1.0.0"
+version = "1.1.0"
 requires-python = ">=3.10"
 dependencies = ["opencv-python", "numpy"]
 
