@@ -147,5 +147,15 @@ app.registerExtension({
       }
       return result
     }
+
+    // Context menu works in both the classic canvas and Vue Nodes 2.0.
+    const originalGetExtraMenuOptions = nodeType.prototype.getExtraMenuOptions
+    nodeType.prototype.getExtraMenuOptions = function (canvas, menuOptions) {
+      originalGetExtraMenuOptions?.apply(this, arguments)
+      menuOptions.push({
+        content: 'Analyze source (auto settings)',
+        callback: () => analyze(this)
+      })
+    }
   }
 })
