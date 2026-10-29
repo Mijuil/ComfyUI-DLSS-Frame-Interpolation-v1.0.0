@@ -193,6 +193,28 @@ The two upscale nodes group their many controls into four collapsible sections, 
 
 A disabled section leaves its parameters at neutral values; the underlying DLSS processing is identical. Section titles are part of the input schema (`display_name`), so they appear in the Properties panel and in saved-workflow JSON regardless of frontend; the canvas banners come from a tiny bundled JavaScript extension (`web/dlss_sections.js`, served via `WEB_DIRECTORY`).
 
+## One-click source analysis
+
+Both upscale nodes carry an **Analyze source** button (also available via the node context menu as *Analyze source (auto settings)*). It reads the connected loader — a LoadImage frame or an even sample of frames from a LoadVideo/VHS video — measures it on the CPU and writes the optimal settings straight into the node's sliders in one click:
+
+| Measured on the source | Suggested settings |
+| --- | --- |
+| Grain / compression noise (luma + chroma) | Skin smoothing strength |
+| Softness (Laplacian variance) | Clarity, sharpen |
+| Overbright / clipped highlights | Gamma darkening, highlights recovery |
+| Underexposure / crushed blacks | Exposure lift, shadow lift |
+| Flat, hazy contrast | Contrast |
+| H.264/H.265 8px blocking | Debanding toggle |
+
+How it behaves:
+
+- **One click, coherent state.** Scattered manual values are first returned to the node's defaults, then the measured optima are applied — you never end up in a mix of old manual values.
+- **Manual tuning stays king.** Every auto-filled widget gets a temporary `· auto` label; the mark clears on that widget as soon as you touch it. Nothing is locked.
+- **No devtools needed.** The button itself flashes the result (`✓ Applied N setting(s)` / `✗ Connect a source first`), and a toast summarizes what changed. Metrics and per-setting reasons are logged to the browser console for those who want them.
+- **Range-safe.** Values are clamped to each widget's own min/max, so the analyzer can never push a slider (e.g. gamma) out of ComfyUI's accepted range.
+
+A *Reset enhancements to default* context-menu entry returns all enhancement and color controls to their neutral state without running any analysis.
+
 ## Neural Rendering controls
 
 Both upscale nodes expose the controls retained from DLSS 5 Visual Enhancer:
