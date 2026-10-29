@@ -137,8 +137,8 @@ Replace the ComfyUI path if needed:
 
 ```bash
 cd "$HOME/ComfyUI/custom_nodes"
-git clone https://github.com/Konohamaru04/ComfyUI-NVIDIA-DLSS-Frame-Interpolation.git
-cd ComfyUI-NVIDIA-DLSS-Frame-Interpolation
+git clone https://github.com/Mijuil/ComfyUI-DLSS-Frame-Interpolation-v1.0.0.git
+cd ComfyUI-DLSS-Frame-Interpolation-v1.0.0
 git lfs install --local
 git lfs pull
 ```
