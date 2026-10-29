@@ -7,6 +7,7 @@ dependencies = ["opencv-python", "numpy"]
 
 [project.urls]
 Repository = "https://github.com/Mijuil/ComfyUI-DLSS-Frame-Interpolation-v1.0.0"
+Upstream = "https://github.com/Konohamaru04/ComfyUI-NVIDIA-DLSS-Frame-Interpolation"
 
 [tool.comfy]
 PublisherId = "merserk"

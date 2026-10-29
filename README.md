@@ -1,5 +1,20 @@
 # ComfyUI NVIDIA DLSS 5 Visual Enhancer
 
+## Credits and license
+
+This project is a **fork of [ComfyUI-NVIDIA-DLSS-Frame-Interpolation](https://github.com/Konohamaru04/ComfyUI-NVIDIA-DLSS-Frame-Interpolation)** by **Konohamaru04** (originally built on work by Merserk). The core DLSS integration — the `dlss_engine` runtime, native DLSSG/DLSS-SR/NR workers, the RenoDX/ReShade carrier, FFmpeg pipeline, Linux/Wine support, and CI — is entirely the upstream project's work, released under the MIT license. The original MIT license text and copyright notice are preserved in [LICENSE-DLSS-Visual-Enhancer.txt](LICENSE-DLSS-Visual-Enhancer.txt).
+
+Fork additions by Mijuil (also MIT):
+
+- Switchable UI sections on the upscale nodes (Neural Processing, Output Composition, Quality & Cleanup, Color & Light), each gated by its own enable toggle
+- One-click **Analyze source** auto-tuning: measures the connected source and writes suggested cleanup/color settings into the node (`web/dlss_autotune.js`, `dlss_engine/core/analyze.py`)
+- SDR output composition, color grading (luma match, exposure, contrast, saturation, shadows, highlights), and post-DLSS cleanup (debanding, gamma, skin smoothing, clarity, sharpening, temporal deflicker)
+- Bundled example workflows, `install.bat` one-click installer, and packaging metadata
+
+Upstream may resync this fork at any time; pull requests and issues about the core engine belong in the upstream repository.
+
+---
+
 Native NVIDIA DLSS processing for ComfyUI with three separate nodes:
 
 - **NVIDIA DLSS Frame Interpolation** — increases video frame rate.

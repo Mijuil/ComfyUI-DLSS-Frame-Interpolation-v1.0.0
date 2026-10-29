@@ -1,6 +1,7 @@
 MIT License
 
-Copyright (c) 2026 Mijuil
+Copyright (c) 2026 Konohamaru04
+Copyright (c) 2026 Mijuil (DLSS 5 Visual Enhancer additions: UI sections, one-click source analysis, SDR composition, color grading, cleanup)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
