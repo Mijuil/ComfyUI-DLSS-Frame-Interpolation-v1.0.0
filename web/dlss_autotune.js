@@ -1,21 +1,24 @@
 /**
- * DLSS Frame Interpolation — "Analyze source" auto-tuning.
+ * DLSS Frame Interpolation — one-click "Analyze source" auto-tuning.
  *
- * Adds two entries to every DLSS node that owns the "Quality & cleanup" and
- * "Color & light" sections (the enable_enhance / enable_color toggles):
- *   - a canvas button "Analyze source" (classic canvas mode only)
- *   - context menu items "Analyze source (auto settings)" and
- *     "Reset enhancements to neutral" (both canvas modes)
+ * Adds an "Analyze source" button to every DLSS node that owns the
+ * "Quality & cleanup" and "Color & light" sections (enable_enhance /
+ * enable_color toggles). Context menu carries the same action plus a
+ * "Reset enhancements to neutral" fallback.
  *
- * Clicking Analyze traces the node's media input upstream to the loader
- * (LoadImage / LoadVideo), asks the backend to measure the source and writes
- * the suggested values into the node's widgets. Touched widgets get an
- * "auto" label suffix that clears on manual edit. Reasons are logged to the
- * browser console.
+ * One click: scattered manual values are first returned to neutral, then the
+ * backend measures the connected source (image, or an even sample of video
+ * frames) and the optimal values are written straight into the widgets -
+ * sliders and toggles visibly line up. Every changed widget gets an "auto"
+ * label suffix; touching that widget manually clears the mark. Manual
+ * fine-tuning is never blocked.
+ *
+ * Feedback is shown on the button itself and as a toast - no devtools needed.
  */
 import { app } from '../../scripts/app.js'
 
-const EXTENSION_NAME = 'DLSS.FrameInterpolation.AnalyzeSource.v2'
+const EXTENSION_NAME = 'DLSS.FrameInterpolation.AnalyzeSource.v3'
+const BUTTON_LABEL = 'Analyze source'
 
 // Nodes that carry the enhancer/color sections.
 const TARGET_WIDGETS = ['enable_enhance', 'enable_color']
@@ -31,8 +34,11 @@ const LOADERS = {
 
 const AUTO_SUFFIX = ' · auto'
 
-// Neutral values for the sections the analyzer controls.
+// Baseline the click always starts from, so scattered manual values can
+// never survive an analysis.
 const NEUTRAL = {
+  enable_enhance: false,
+  enable_color: false,
   enable_deband: false,
   edge_only: false,
   output_detail_strength: 1.0,
@@ -99,11 +105,11 @@ function applyValues (node, values, reasons, auto) {
     if (widget.value === next) continue
     if (auto) markAuto(widget)
     widget.value = next
-    touched.push([name, next, reasons?.[name] || (auto ? '' : 'reset to neutral')])
+    touched.push([name, next, reasons?.[name] || ''])
   }
   if (touched.length) {
     node.setDirtyCanvas?.(true, true)
-    app.graph.setDirtyCanvas?.(true, true)
+    app.canvas?.setDirtyCanvas?.(true, true)
   }
   return touched
 }
@@ -116,12 +122,25 @@ function showToast (severity, summary, detail) {
   }
 }
 
+function flashButton (node, label, revertMs) {
+  const button = node.__dlssAnalyzeButton
+  if (!button) return
+  button.name = label
+  node.setDirtyCanvas?.(true, true)
+  setTimeout(() => {
+    button.name = BUTTON_LABEL
+    node.setDirtyCanvas?.(true, true)
+  }, revertMs)
+}
+
 async function analyze (node) {
   const source = findSource(node)
   if (!source) {
-    showToast('error', 'DLSS Analyze', 'Connect a LoadImage / LoadVideo node with a selected file first.')
+    flashButton(node, '✗ Connect a source first', 5000)
+    showToast('error', 'DLSS Analyze', 'Connect a LoadImage / LoadVideo node with a selected file, then run Analyze again.')
     return
   }
+  flashButton(node, 'Analyzing…', 30000)
   try {
     const response = await app.api.fetchApi('/dlss/analyze', {
       method: 'POST',
@@ -130,24 +149,35 @@ async function analyze (node) {
     })
     const payload = await response.json()
     if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`)
-    const touched = applyValues(node, payload.values || {}, payload.reasons || {}, true)
+    // Neutral baseline first, analyzer suggestions on top - one click always
+    // ends in a coherent state, never in a mix of old manual values.
+    const merged = { ...NEUTRAL, ...(payload.values || {}) }
+    const reasons = { ...payload.reasons }
+    for (const key of Object.keys(NEUTRAL)) {
+      if (!(key in (payload.values || {}))) reasons[key] = 'reset to neutral'
+    }
+    const touched = applyValues(node, merged, reasons, true)
     console.groupCollapsed(`[DLSS Analyze] ${node.title}: ${touched.length} setting(s) from ${source.loader}`)
     console.log('metrics', payload.metrics)
     for (const [name, value, reason] of touched) console.log(`${name} = ${value}  <- ${reason}`)
     console.groupEnd()
-    showToast('success', 'DLSS Analyze',
-      touched.length
-        ? `Applied ${touched.length} setting(s) from ${source.loader}. Details in browser console (F12).`
-        : 'Source looks neutral - nothing to change.')
+    if (touched.length) {
+      flashButton(node, `✓ Applied ${touched.length} setting(s)`, 6000)
+      showToast('success', 'DLSS Analyze',
+        `${touched.length} setting(s) tuned to the source (marked "· auto"). Tweak any slider freely - the mark clears where you edit.`)
+    } else {
+      flashButton(node, '✓ Source is clean, settings neutral', 6000)
+      showToast('info', 'DLSS Analyze', 'The source looks clean - enhancements set to neutral.')
+    }
   } catch (error) {
     console.error('[DLSS Analyze] failed:', error)
+    flashButton(node, '✗ Analyze failed', 6000)
     showToast('error', 'DLSS Analyze', error.message)
   }
 }
 
 function resetToNeutral (node) {
   const touched = applyValues(node, NEUTRAL, {}, false)
-  console.log(`[DLSS Analyze] ${node.title}: reset ${touched.length} setting(s) to neutral`)
   showToast('info', 'DLSS Analyze', `Reset ${touched.length} enhancement setting(s) to neutral.`)
 }
 
@@ -164,11 +194,11 @@ app.registerExtension({
       const result = originalNodeCreated?.apply(this, arguments)
       if (!this.__dlssAnalyzeButton) {
         try {
-          const button = this.addWidget('button', 'Analyze source', null, () => analyze(this))
+          const button = this.addWidget('button', BUTTON_LABEL, null, () => analyze(this))
           button.serialize = false
           this.__dlssAnalyzeButton = button
         } catch {
-          /* widget host unavailable - degrade silently */
+          /* widget host unavailable - menu entry still works */
         }
       }
       return result
@@ -180,7 +210,7 @@ app.registerExtension({
       originalGetExtraMenuOptions?.apply(this, arguments)
       menuOptions.push(
         {
-          content: 'Analyze source (auto settings)',
+          content: `⭐ ${BUTTON_LABEL} (auto settings)`,
           callback: () => analyze(this)
         },
         {
