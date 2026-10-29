@@ -6,18 +6,19 @@
  * enable_color toggles). Context menu carries the same action plus a
  * "Reset enhancements to neutral" fallback.
  *
- * One click: scattered manual values are first returned to neutral, then the
- * backend measures the connected source (image, or an even sample of video
- * frames) and the optimal values are written straight into the widgets -
- * sliders and toggles visibly line up. Every changed widget gets an "auto"
- * label suffix; touching that widget manually clears the mark. Manual
+ * One click: scattered manual values are first returned to the node's own
+ * defaults (read from the Python schema, so gamut like gamma 0.25..2.5 can
+ * never be violated), then the backend measures the connected source
+ * (image, or an even sample of video frames) and the optimal values are
+ * written into the widgets. Every changed widget gets an "auto" label
+ * suffix; touching that widget manually clears the mark. Manual
  * fine-tuning is never blocked.
  *
  * Feedback is shown on the button itself and as a toast - no devtools needed.
  */
 import { app } from '../../scripts/app.js'
 
-const EXTENSION_NAME = 'DLSS.FrameInterpolation.AnalyzeSource.v3'
+const EXTENSION_NAME = 'DLSS.FrameInterpolation.AnalyzeSource.v4'
 const BUTTON_LABEL = 'Analyze source'
 
 // Nodes that carry the enhancer/color sections.
@@ -34,25 +35,25 @@ const LOADERS = {
 
 const AUTO_SUFFIX = ' · auto'
 
-// Baseline the click always starts from, so scattered manual values can
-// never survive an analysis.
-const NEUTRAL = {
-  enable_enhance: false,
-  enable_color: false,
-  enable_deband: false,
-  edge_only: false,
-  output_detail_strength: 1.0,
-  gamma: 0.0,
-  skin_smoothing: 0.0,
-  clarity: 1.0,
-  sharpen: 0.0,
-  temporal_deflicker: 0.0,
-  luma_match: 0.0,
-  exposure: 0.0,
-  contrast: 0.0,
-  saturation: 0.0,
-  shadows: 0.0,
-  highlights: 0.0
+// Enhancement widgets the one-click reset covers. Values are NOT hardcoded:
+// the neutral state is read from the node schema defaults at registration.
+const TUNABLE = [
+  'enable_enhance', 'enable_deband', 'gamma', 'skin_smoothing',
+  'clarity', 'sharpen', 'edge_only', 'temporal_deflicker',
+  'output_detail_strength',
+  'enable_color', 'luma_match', 'exposure', 'contrast',
+  'saturation', 'shadows', 'highlights'
+]
+
+function buildNeutral (nodeData) {
+  const neutral = {}
+  for (const section of [nodeData.input?.required, nodeData.input?.optional]) {
+    for (const name of TUNABLE) {
+      const def = section?.[name]
+      if (Array.isArray(def) && def[1] && 'default' in def[1]) neutral[name] = def[1].default
+    }
+  }
+  return neutral
 }
 
 function findSource (node) {
@@ -101,7 +102,15 @@ function applyValues (node, values, reasons, auto) {
     const widget = node.widgets?.find((w) => w.name === name)
     if (!widget || widget.type === 'button') continue
     const isToggle = widget.type === 'toggle' || typeof widget.value === 'boolean'
-    const next = isToggle ? !!raw : Number(raw)
+    let next = isToggle ? !!raw : Number(raw)
+    // Respect the widget's own bounds so a stale backend or schema can
+    // never push a slider out of range (ComfyUI rejects out-of-range input).
+    if (!isToggle) {
+      const min = widget.options?.min
+      const max = widget.options?.max
+      if (Number.isFinite(min)) next = Math.max(min, next)
+      if (Number.isFinite(max)) next = Math.min(max, next)
+    }
     if (widget.value === next) continue
     if (auto) markAuto(widget)
     widget.value = next
@@ -149,12 +158,13 @@ async function analyze (node) {
     })
     const payload = await response.json()
     if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`)
-    // Neutral baseline first, analyzer suggestions on top - one click always
-    // ends in a coherent state, never in a mix of old manual values.
-    const merged = { ...NEUTRAL, ...(payload.values || {}) }
+    // Node-default baseline first, analyzer suggestions on top - one click
+    // always ends in a coherent state, never in a mix of old manual values.
+    const neutral = node.__dlssNeutral ?? {}
+    const merged = { ...neutral, ...(payload.values || {}) }
     const reasons = { ...payload.reasons }
-    for (const key of Object.keys(NEUTRAL)) {
-      if (!(key in (payload.values || {}))) reasons[key] = 'reset to neutral'
+    for (const key of Object.keys(neutral)) {
+      if (!(key in (payload.values || {}))) reasons[key] = 'reset to default'
     }
     const touched = applyValues(node, merged, reasons, true)
     console.groupCollapsed(`[DLSS Analyze] ${node.title}: ${touched.length} setting(s) from ${source.loader}`)
@@ -177,8 +187,8 @@ async function analyze (node) {
 }
 
 function resetToNeutral (node) {
-  const touched = applyValues(node, NEUTRAL, {}, false)
-  showToast('info', 'DLSS Analyze', `Reset ${touched.length} enhancement setting(s) to neutral.`)
+  const touched = applyValues(node, node.__dlssNeutral ?? {}, {}, false)
+  showToast('info', 'DLSS Analyze', `Reset ${touched.length} enhancement setting(s) to default.`)
 }
 
 app.registerExtension({
@@ -188,10 +198,12 @@ app.registerExtension({
       name in (nodeData.input?.required ?? {}) || name in (nodeData.input?.optional ?? {}))) {
       return
     }
+    const neutral = buildNeutral(nodeData)
 
     const originalNodeCreated = nodeType.prototype.onNodeCreated
     nodeType.prototype.onNodeCreated = function () {
       const result = originalNodeCreated?.apply(this, arguments)
+      this.__dlssNeutral = { ...neutral }
       if (!this.__dlssAnalyzeButton) {
         try {
           const button = this.addWidget('button', BUTTON_LABEL, null, () => analyze(this))
@@ -214,7 +226,7 @@ app.registerExtension({
           callback: () => analyze(this)
         },
         {
-          content: 'Reset enhancements to neutral',
+          content: 'Reset enhancements to default',
           callback: () => resetToNeutral(this)
         }
       )

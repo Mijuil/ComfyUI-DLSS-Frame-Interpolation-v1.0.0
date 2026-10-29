@@ -74,10 +74,29 @@ def _metrics_from_luma(luma: np.ndarray) -> dict:
     }
 
 
+def _chroma_noise(image: np.ndarray) -> float:
+    """Median-abs-Laplacian noise on the chroma planes (color grain).
+
+    Luma-only noise metrics under-measure heavily colored sensor/compression
+    grain, which is exactly the grain that survives upscaling.
+    """
+    ycc = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb).astype(np.float32) / 255.0
+    h, w = ycc.shape[:2]
+    scale = 512.0 / max(h, w)
+    if scale < 1.0:
+        ycc = cv2.resize(ycc, (int(round(w * scale)), int(round(h * scale))), interpolation=cv2.INTER_AREA)
+    total = 0.0
+    for plane in (ycc[..., 1], ycc[..., 2]):
+        lap = cv2.Laplacian(plane, cv2.CV_32F)
+        total += float(np.median(np.abs(lap - np.median(lap))))
+    return total / 2.0
+
+
 def analyze_image(image: np.ndarray) -> tuple[dict, dict]:
     """Analyze one RGB uint8 frame. Returns (metrics, suggestions)."""
     luma = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
     metrics = _metrics_from_luma(luma)
+    metrics["chroma_noise"] = _chroma_noise(image)
     return metrics, _suggest(metrics)
 
 
@@ -91,6 +110,7 @@ def analyze_video_frames(frames: list[np.ndarray]) -> tuple[dict, dict]:
         key: float(np.mean([_metrics_from_luma(l)[key] for l in luma_frames]))
         for key in ("mean_luma", "contrast_p5_p95", "sharpness_var", "noise_mad", "dark_clip", "bright_clip", "blocking")
     }
+    stacked["chroma_noise"] = float(np.mean([_chroma_noise(frame) for frame in frames]))
     # Flicker: mean absolute luma delta between consecutive samples.
     deltas = [
         float(np.abs(b.mean() - a.mean()))
@@ -139,6 +159,7 @@ def _suggest(m: dict) -> dict:
         notes[name] = note
 
     noise = m["noise_mad"]
+    chroma = m.get("chroma_noise", 0.0)
     sharpness = m["sharpness_var"]
     mean_luma = m["mean_luma"]
     contrast = m["contrast_p5_p95"]
@@ -148,9 +169,12 @@ def _suggest(m: dict) -> dict:
 
     # --- Quality & cleanup -------------------------------------------------
     # Noise: median abs Laplacian above ~0.012 indicates visible grain.
-    if noise > 0.012:
-        set_widget("skin_smoothing", min(0.5, 0.2 + (noise - 0.012) * 8.0),
-                   f"noise {noise:.3f} above 0.012")
+    # Chroma grain counts at half weight - colored grain survives upscaling
+    # and reads as "dirty" skin even when luma looks fine.
+    total_noise = noise + 0.5 * chroma
+    if total_noise > 0.012:
+        set_widget("skin_smoothing", min(0.5, 0.2 + (total_noise - 0.012) * 8.0),
+                   f"noise {noise:.3f} + chroma {chroma:.3f} above 0.012")
     # Sharpness: low Laplacian variance means soft source.
     if sharpness < 0.0015:
         set_widget("clarity", min(0.4, 0.2 + (0.0015 - sharpness) * 100.0),
