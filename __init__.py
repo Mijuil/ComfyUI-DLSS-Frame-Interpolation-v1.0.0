@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
+import asyncio
 import json
 from pathlib import Path
 import shutil
@@ -45,6 +46,7 @@ from .dlss_engine.core.runtime import (
     resolve_upscaling_mode,
     verify_feature_18,
 )
+from .dlss_engine.core.analyze import analyze_image, analyze_video_frames, sample_video_frames
 from .dlss_engine.frame_interpolation import ENGINE_CHOICES, FPS_CHOICES, FrameInterpolationOptions, interpolate_video
 from .dlss_engine.video import ConversionOptions, convert_video
 
@@ -691,6 +693,56 @@ class DLSSVisualEnhancerExtension(ComfyExtension):
 
 async def comfy_entrypoint() -> DLSSVisualEnhancerExtension:
     return DLSSVisualEnhancerExtension()
+
+
+def _resolve_analyze_path(name: str) -> Path:
+    """Resolve a frontend-supplied filename against ComfyUI input directories."""
+    candidates = [
+        folder_paths.get_input_directory(),
+        folder_paths.get_temp_directory(),
+        folder_paths.get_output_directory(),
+    ]
+    for base in candidates:
+        base_path = Path(base).resolve()
+        candidate = (base_path / name).resolve()
+        if candidate.is_relative_to(base_path) and candidate.exists():
+            return candidate
+    raise FileNotFoundError(f"Analyze source not found in ComfyUI input directories: {name!r}")
+
+
+async def _handle_analyze(request):
+    """POST /dlss/analyze {kind: image|video, path: <filename>} -> suggestions."""
+    from aiohttp import web
+
+    try:
+        payload = await request.json()
+        source_path = _resolve_analyze_path(str(payload.get("path", "")))
+        kind = str(payload.get("kind", "image"))
+        if kind == "video":
+            frames = await asyncio.to_thread(sample_video_frames, str(source_path))
+            metrics, result = await asyncio.to_thread(analyze_video_frames, frames)
+            analyzed = {"kind": "video", "frames": len(frames)}
+        else:
+            image = await asyncio.to_thread(cv2.imread, str(source_path), cv2.IMREAD_COLOR)
+            if image is None:
+                raise ValueError(f"Could not decode image: {source_path.name}")
+            metrics, result = await asyncio.to_thread(analyze_image, cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            analyzed = {"kind": "image", "frames": 1}
+        return web.json_response({
+            "analyzed": analyzed,
+            "metrics": metrics,
+            "values": result["values"],
+            "reasons": result["reasons"],
+        })
+    except (FileNotFoundError, ValueError, RuntimeError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:  # noqa: BLE001 - surfaced to the frontend dialog
+        return web.json_response({"error": f"Analysis failed: {error}"}, status=500)
+
+
+from server import PromptServer  # noqa: E402 - route table exists only after server import
+
+PromptServer.instance.routes.post("/dlss/analyze")(_handle_analyze)
 
 
 __all__ = [
